@@ -73,66 +73,86 @@ The <<table_tee_services>> table lists the services in the TEE service group:
 | NORMAL_REQUEST
 
 | 0x04
-| TEE_EXIT
+| TEE_PROBE_DOMAIN
 | NORMAL_REQUEST
 
 | 0x05
-| TEE_SIGNAL_BUS_SETUP
+| TEE_PROBE_ENDPOINT
 | NORMAL_REQUEST
 
 | 0x06
-| TEE_SIGNAL_BUS_TEARDOWN
+| TEE_PROBE_MEMORY_PARCEL
 | NORMAL_REQUEST
 
 | 0x07
-| TEE_SIGNAL_RAISE
+| TEE_PROBE_MEMORY_SEGMENT
 | NORMAL_REQUEST
 
 | 0x08
-| TEE_SIGNAL_RETRIEVE
+| TEE_PROBE_SERVICE
 | NORMAL_REQUEST
 
 | 0x09
-| TEE_MEMORY_PARCEL_CREATE
-| NORMAL_REQUEST
+| TEE_EXIT
+| POSTED_REQUEST
 
 | 0x0A
-| TEE_MEMORY_PARCEL_ACCEPT
+| TEE_SIGNAL_BUS_SETUP
 | NORMAL_REQUEST
 
 | 0x0B
-| TEE_MEMORY_PARCEL_RELEASE
+| TEE_SIGNAL_BUS_TEARDOWN
 | NORMAL_REQUEST
 
 | 0x0C
-| TEE_MEMORY_PARCEL_RECLAIM
+| TEE_SIGNAL_RAISE
 | NORMAL_REQUEST
 
 | 0x0D
-| TEE_MEMORY_SEGMENT_SEND
+| TEE_SIGNAL_RETRIEVE
 | NORMAL_REQUEST
 
 | 0x0E
-| TEE_MEMORY_SEGMENT_RECEIVE
+| TEE_MEMORY_PARCEL_CREATE
 | NORMAL_REQUEST
 
 | 0x0F
-| TEE_REGISTER_FOR_LIFECYCLE_INFO
+| TEE_MEMORY_PARCEL_ACCEPT
 | NORMAL_REQUEST
 
 | 0x10
-| TEE_ON_START_INFO
+| TEE_MEMORY_PARCEL_RELEASE
 | NORMAL_REQUEST
 
 | 0x11
-| TEE_ON_SHUTDOWN_INFO
+| TEE_MEMORY_PARCEL_RECLAIM
 | NORMAL_REQUEST
 
 | 0x12
-| TEE_ON_CHANGED_INFO
+| TEE_MEMORY_SEGMENT_SEND
 | NORMAL_REQUEST
 
 | 0x13
+| TEE_MEMORY_SEGMENT_RECEIVE
+| NORMAL_REQUEST
+
+| 0x14
+| TEE_REGISTER_FOR_LIFECYCLE_INFO
+| NORMAL_REQUEST
+
+| 0x15
+| TEE_ON_START_INFO
+| NORMAL_REQUEST
+
+| 0x16
+| TEE_ON_SHUTDOWN_INFO
+| NORMAL_REQUEST
+
+| 0x17
+| TEE_ON_CHANGED_INFO
+| NORMAL_REQUEST
+
+| 0x18
 | TEE_CALL
 | NORMAL_REQUEST
 
@@ -209,7 +229,7 @@ changing its properties at runtime) between domains.
 | VALUE
 
 | MEMORY_DONATE
-| 1
+| 0
 |
 
 [cols="2,9a", options="header"]
@@ -229,7 +249,7 @@ changing its properties at runtime) between domains.
 !===
 
 | MEMORY_LEND
-| 2
+| 1
 |
 
 [cols="2,9a", options="header"]
@@ -249,7 +269,7 @@ changing its properties at runtime) between domains.
 !===
 
 | MEMORY_SHARE
-| 3
+| 2
 |
 
 [cols="2,9a", options="header"]
@@ -269,7 +289,7 @@ changing its properties at runtime) between domains.
 !===
 
 | SIGNAL_BUS
-| 4
+| 3
 |
 
 [cols="2,9a", options="header"]
@@ -296,7 +316,7 @@ zero.
 !===
 
 | MULTISEGMENT_OPS
-| 5
+| 4
 |
 Number of concurrent pending multi-segment memory operations supported per
 endpoint.
@@ -309,25 +329,6 @@ pending with the framework at a time.
 A value of 0 for this feature means that the framework does not support
 multi-segment memory operations.
 
-| SYSINFO_FORMAT
-| 6
-| List of the formats in which the framework can describe the running system and
-its parts for the TEE_PROBE_SYSTEM and lifecycle services
-
-[cols="1,1, 5a", options="header"]
-!===
-! Bits
-! Name
-! Description
-
-! [31:31]
-! CBOR
-! CBOR cite:[CBOR] description following the CCDL cite:[CCDL] schema in <<table_ccdl_encoding>>.
-
-! [30:0]
-! _Reserved_
-! Must be 0.
-!===
 |===
 
 [#table_tee_probe_features_request_data]
@@ -383,127 +384,103 @@ its parts for the TEE_PROBE_SYSTEM and lifecycle services
 
 
 ==== Service: TEE_PROBE_SYSTEM (SERVICE_ID: 0x03)
-This service provides the caller with information on all the endpoints present
-in the system and reachable via the framework.
+This and the following services provides the caller with information on all the
+endpoints present in the system and reachable via the framework.
 
-This service can be used to obtain a description of the whole system (i.e. all
-REEs and TEEs reachable via the services of the TEE Service Group) or selected
-components of it, as described in the following table.
+This service can be used to obtain the list of domains containing REE and TEE
+endpoints. The numeric identifiers associated to the REE and TEE domains are
+arbitrarily assigned by the framework to the domains present in the system for
+the sole purpose of identifying them uniquely within the framework and allow the
+subsequent discovery of their endpoints via the TEE_PROBE_DOMAIN service. These
+numeric identifiers are guaranteed to be stable within a boot cycle but not
+across subsequent boots.
 
-[#table_tee_probe_system_targets]
-.TEE_PROBE_SYSTEM Target Types
-[cols="2,1,9a", options="header"]
+This service is meant as the starting point for a newly started REE or TEE to
+initiate the discovery process of all the framework entities it can interact
+with and, for this reason, in addition to the list of all domains, it also
+returns the domain and physical endpoint identifiers of its caller, thereby
+allowing it to establish its own identity in case this information is not
+otherwise available via different configuration means.
+
+[NOTE]
+====
+
+The framework does not provide any guarantee of atomicity in the execution of
+the TEE_PROBE_SYSTEM, TEE_PROBE_DOMAIN, TEE_PROBE_ENDPOINT,
+TEE_PROBE_MEMORY_PARCEL, TEE_PROBE_MEMORY_SEGMENT and TEE_PROBE_SERVICES
+services.
+
+A unique identifier returned by any of the above commands might become invalid
+by the time it is used in any other services (e.g. an endpoint might exist in a
+domain and listed in the response to TEE_PROBE_DOMAIN, but it might invoke the
+TEE_EXIT service before the TEE_PROBE_ENDPOINT service with its identifier is
+invoked).
+
+To help detect such race conditions, the caller can register for changes in
+the lifecycle of endpoints via the TEE_REGISTER_FOR_LIFECYCLE_INFO service
+before initiating a system discovery.
+
+====
+
+[#table_tee_probe_system_data]
+.Request Data
+[cols="1", width=100%, align="center", options="header"]
 |===
-| Target type
-| VALUE
-| Description.
+| NA
+|===
 
-| Whole system
+[#table_tee_probe_system_response_data]
+.Response Data
+[cols="2, 6, 3, 18a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
 | 0
-|
+| STATUS
+| int32
+| Return error code.
 
-This is the set of all REEs and TEEs reachable via the TEE Services, their
-identifiers, all their proxied endpoints, services and their characteristics.
-This target type allows a newly created endpoint to discover all the other
-entities it can interact with.
+[cols="5,5", options="header"]
+!===
+! Error Code
+! Description
 
-| Endpoint
+! RPMI_SUCCESS
+! Service completed successfully.
+!===
+- Other errors <<table_error_codes>>.
+
 | 1
-|
+| CALLER_DOMAIN
+| uint32
+| Domain identifier of the calling endpoint.
 
-Single endpoint in the system (REE, TEE or proxied). If the endpoint is an REE
-or TEE, this includes the list of all of its services. This target type allows
-the caller to discover additional information on an endpoint for which it
-already has the identifier.
-
-| Service
 | 2
-|
+| CALLER_ENDPOINT
+| uint32
+| Identifier of the calling physical endpoint.
 
-Multiple endpoints can implement the same service (identified by a UUID). This
-target type allows the caller to quickly discover all the endpoints which
-implement a specific service without the need to parse the description of the
-whole system.
-
-| Self
 | 3
-|
+| DOMAIN_ID_CNT
+| uint32
+| Length (N) of the array of domains in the system partaking in the RPMI TEE.
+framework.
 
-This target type allows an endpoint to acquire information about itself from
-the framework. This can be used by a newly created REE or TEE to discover if
-the bootloaders which predated it in the current VM shared or lent memory for
-specific use cases, so that this memory can be later reclaimed.
-
-| Memory parcel
 | 4
-|
-
-This target type allows an endpoint to acquire information from the framework
-about a specific memory parcel which it created and is the owner of. This can be
-used by a newly created REE or TEE to discover the details of each memory parcel
-which the bootloaders which predated it in the current VM shared or lent with
-another endpoint.
-
+| DOMAIN_ID[N]
+| uint32
+| Array of domain identifiers.
 |===
 
-The current version of the RPMI TEE Service Group only specifies CBOR
-cite:[CBOR] as a mandated format, but other formats may be added in future.
+==== Service: TEE_PROBE_DOMAIN (SERVICE_ID: 0x04)
+This service provides the caller with the list of the identifiers of all
+physical and proxied endpoints in a domain and whether they are REEs or TEEs.
 
-The CBOR response data is encoded according to the CCDL cite:[CCDL]
-schema in the following table.
 
-[#table_ccdl_encoding]
-.CCDL Encoding of system information
-```
-tee-subsystem = [2* domain]
-
-domain = [* endpoint]
-
-endpoint = ee-endpoint / proxied-endpoint
-
-ee-endpoint = {
-  type: "physical",
-  id: uint,
-  name: bstr,
-  persistent: bool,
-  proxied-endpoints: [* proxied-endpoint],
-  services: [* buuid],
-  metadata: bstr,
-  ?active_parcels: [* parcel],
-}
-
-proxied-endpoint = {
-  type: "proxied",
-  id: uint,
-  name: bstr,
-  ?active_parcels: [* parcel],
-}
-
-parcel = {
-  id: uint,
-  residual_access: ac,
-  others: [1* parcel_endpoint],
-  label: bstr,
-  ?memory: [1* memory_block],
-}
-
-ac = &(none: 0, ro: 1, wo: 2, rw: 3, rwx: 7)
-
-parcel_endpoint = {
-  id: uint,
-  access: ac,
-  accepted: bool,
-}
-
-memory_block = {
-  address: uint,
-  size: uint,
-}
-
-buuid = #6.37(bstr)
-```
-
-[#table_tee_system_probe_request_data]
+[#table_tee_probe_domain_request_data]
 .Request Data
 [cols="2, 6, 3, 18a", width=100%, align="center", options="header"]
 |===
@@ -513,101 +490,13 @@ buuid = #6.37(bstr)
 | Description
 
 | 0
-| SYSINFO_FORMAT
+| DOMAIN_ID
 | uint32
-| The format in which the response data will be returned. Needs to be one of the
-formats returned by the TEE_PROBE_FEATURES service.
-
-| 1
-| TARGET_TYPE
-| uint32
-| Type of the target being probed, as described in
-<<table_tee_probe_system_targets>>. Valid values and corresponding expected
-content of the returned response data are described in the following table
-
-[cols="2,12a", options="header"]
-!===
-! Value
-! Content of SYSTEM_DATA in <<table_tee_system_probe_response_data>>.
-
-! 0
-! Whole system.
-
-Description of the whole system topology excluding the items marked as optional
-in <<table_ccdl_encoding>>.
-
-! 1
-! Endpoint
-
-Description of the requested endpoint. Items marked as optional in
-<<table_ccdl_encoding>> are not included.
-
-! 2
-! Service
-
-Description of the subset of the whole system topology comprising all the
-endpoints providing the requested service. Items marked as optional in
-<<table_ccdl_encoding>> are not included.
-
-! 3
-! Self
-
-Description of the calling endpoint including all of its available optional
-items, but not the memory blocks of the active parcels created by the endpoint.
-
-! 4
-! Memory parcel
-
-Full description, including the memory blocks, of the requested parcel. The
-parcel must belong to the calling endpoint.
-
-!===
-
-| 2
-| TARGET_LEN
-| uint32
-| Length (N) in bytes of the TARGET field.
-
-Based on the TARGET_TYPE, the following length values are expected.
-
-[cols="4,3,9a", options="header"]
-!===
-! TARGET_TYPE
-! Length (N)
-! Content
-
-! 0
-! 0
-! NA
-
-! 1
-! 4
-! Endpoint identifier.
-
-! 2
-! 16
-! UUID of the service.
-
-! 3
-! 0
-! NA
-
-! 4
-! 4
-! ID of the parcel.
-
-!===
-
-| 3
-| TARGET[N]
-| uint8
-| The target being probed.
-
-
-
+| Unique framework identifier for the queried domain, as returned by
+TEE_PROBE_SYSTEM.
 |===
 
-[#table_tee_system_probe_response_data]
+[#table_tee_probe_domain_response_data]
 .Response Data
 [cols="2, 6, 3, 18a", width=100%, align="center", options="header"]
 |===
@@ -630,26 +519,551 @@ Based on the TARGET_TYPE, the following length values are expected.
 ! Service completed successfully.
 
 ! RPMI_ERR_INVALID_PARAM
-! Invalid SYSINFO_FORMAT, TARGET_TYPE or TARGET.
-
-! RPMI_ERR_DENIED
-! Parcel does not belong to the calling endpoint.
+! Invalid DOMAIN_ID.
 !===
 - Other errors <<table_error_codes>>.
 
 | 1
-| SYSTEM_DATA_LEN
+| DOMAIN_FLAGS
 | uint32
-| Length (N) in bytes of the returned data.
+| 
+
+[cols="1,1, 5a", options="header"]
+!===
+! Bits
+! Field
+! Description
+
+! [31:31]
+! TEE
+!     
+    0b0: All endpoints in the domain are REEs
+    0b1: All endpoints in the domain are TEEs
+
+! [30:0]
+! _Reserved_
+! Must be 0.
+
+!===
 
 | 2
-| SYSTEM_DATA[N]
+| ENDPOINT_ID_CNT
+| uint32
+| Length (N) of the array of endpoint identifiers in this domain.
+
+| 3
+| ENDPOINT_ID[N]
+| uint32
+| Array of endpoint identifiers.
+|===
+
+==== Service: TEE_PROBE_ENDPOINT (SERVICE_ID: 0x05)
+This service provides the caller with information about an endpoint.
+
+In the Response Data some of the fields will only be present based on identity
+of the caller and the type of the requested endpoint.
+More specifically:
+
+* the MEM_PARCEL_ID array will only contain data when the queried endpoint is
+the calling physical endpoint or a proxied endpoint belonging to it;
+
+* the SERVICES, PROXIED_ENDPOINT_ID and METADATA fields will only contain data when
+the queried endpoint is a physical endpoint.
+
+[#table_tee_probe_endpoint_request_data]
+.Request Data
+[cols="2, 6, 3, 18a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
+| 0
+| ENDPOINT_ID
+| uint32
+| Unique framework identifier for the queried endpoint, as returned by
+TEE_PROBE_DOMAIN, TEE_ON_START_INFO, TEE_ON_SHUTDOWN_INFO or
+TEE_ON_CHANGED_INFO.
+|===
+
+[#table_tee_probe_endpoint_response_data]
+.Response Data
+[cols="8, 16, 6, 36a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
+| 0
+| STATUS
+| int32
+| Return error code.
+
+[cols="7,5a", options="header"]
+!===
+! Error Code
+! Description
+
+! RPMI_SUCCESS
+! Service completed successfully.
+
+! RPMI_ERR_INVALID_PARAM
+! Invalid ENDPOINT_ID.
+!===
+- Other errors <<table_error_codes>>.
+
+| 1
+| FLAGS
+| uint32
+| 
+
+[cols="3,5, 10a", options="header"]
+!===
+! Bits
+! Field
+! Description
+
+! [31:31]
+! TEE
+! The endpoint is:
+
+    0b0: An REE.
+    0b1: A TEE.
+
+! [30:30]
+! PHYSICAL
+! The endpoint is:
+
+    0b0: Proxied.
+    0b1: Physical.
+
+! [29:29]
+! PERSISTENT
+! The endpoint is:
+
+    0b0: Persistent.
+    0b1: Created and shutdown at runtime.
+
+! [28:0]
+! _Reserved_
+! Must be 0.
+
+!===
+
+| 2:9
+| NAME[32]
 | uint8
-| Description of the system or portion thereof, as queried, in the requested format.
+| Name associated with the endpoint for logging and debugging purposes. The
+framework does not guarantee endpoint names to be unique.
+
+| 10
+| PROXIED_ID_CNT
+| uint32
+| Length (N) of the PROXIED_ID array. The length is
+0 if the endpoint identified by ENDPOINT_ID is a proxied endpoint.
+
+| 11
+| MEM_PARCEL_ID_CNT
+| uint32
+| Length (M) of the MEM_PARCEL_ID field. The length is 0 if the endpoint
+identified by ENDPOINT_ID is not the calling endpoint or is not proxied by it.
+
+| 12
+| SERVICES_CNT
+| uint32
+| Number (L) of services in the SERVICES field. The length is 0 if the endpoint
+identified by ENDPOINT_ID is a proxied endpoint.
+
+| 13
+| METADATA_LEN
+| uint32
+| Length (K) in bytes of the METADATA field. The length is 0 if the endpoint
+identified by ENDPOINT_ID is a proxied endpoint.
+
+| 14
+| PROXIED_ID[N]
+| uint32
+| Array of identifiers of the endpoints proxied by ENDPOINT_ID. This array is
+empty if the endpoint identified by ENDPOINT_ID is a proxied endpoint.
+
+| 14+N
+| MEM_PARCEL_ID[M]
+| uint32
+| Array of identifiers of the active memory parcels created by the endpoint
+identified by ENDPOINT_ID. This array is empty if the endpoint identified by
+ENDPOINT_ID is not the calling endpoint or is not proxied by it.
+
+| 14+N+M
+| SERVICES[16L]
+| uint8
+| Data field containing the services provided by the endpoint identified by
+ENDPOINT_ID. Each service is identified by a 16-bytes UUID. This field is empty
+if the endpoint identified by ENDPOINT_ID is a proxied endpoint.
+
+| 14+N+M+4L
+| METADATA[K]
+| uint8
+| Data field containing the optional metadata associated to the endpoint
+identified by ENDPOINT_ID. This field is empty if the endpoint identified by
+ENDPOINT_ID is a proxied endpoint.
+
+|===
+
+==== Service: TEE_PROBE_MEMORY_PARCEL (SERVICE_ID: 0x06)
+This service provides the caller with information about an active memory parcel,
+i.e. a memory parcel created via TEE_MEMORY_PARCEL_CREATE and not yet
+successfully reclaimed via TEE_MEMORY_PARCEL_RECLAIM, or, if created with the
+OWNER_XFER flag set, until it is successfully accepted via
+TEE_MEMORY_PARCEL_ACCEPT.
+
+A physical endpoint can only call this service to get information about a memory
+parcel whose CREATOR_ID corresponds to the same physical endpoint as the caller
+or any of its proxied endpoints.
+
+The encoding of access and acceptance state for each endpoint whose identifier
+is in the RECEIVER_ID array in <<table_tee_probe_memory_parcel_response_data>>
+is described in <<table_mem_access_accept>>.
+
+[#table_mem_access_accept]
+.Memory Access and Acceptance state
+[cols="2,5, 9a", options="header"]
+|===
+| Bits
+| Field
+| Description
+
+| [31:31]
+| EXECUTE
+| 
+    0b0: non-executable
+    0b1: executable
+
+| [30:30]
+| WRITE
+| 
+    0b0: non-writeable
+    0b1: writeable
+
+| [29:29]
+| READ
+| 
+    0b0: non-readable
+    0b1: readable
+
+| [28:1]
+| _Reserved_
+| Must be 0.
+
+| [0:0]
+| ACCEPTED
+| 
+    0b0: not accepted
+    0b1: accepted
+
+|===
+
+[#table_tee_probe_memory_parcel_request_data]
+.Request Data
+[cols="2, 6, 3, 18a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
+| 0
+| MEM_PARCEL_ID
+| uint32
+| Unique identifier for the queried memory parcel.
+|===
+
+[#table_tee_probe_memory_parcel_response_data]
+.Response Data
+[cols="3, 6, 3, 18a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
+| 0
+| STATUS
+| int32
+| Return error code.
+
+[cols="5,5", options="header"]
+!===
+! Error Code
+! Description
+
+! RPMI_SUCCESS
+! Service completed successfully.
+
+! RPMI_ERR_INVALID_PARAM
+! Unknown MEM_PARCEL_ID.
+
+! RPMI_ERR_DENIED
+! MEM_PARCEL_ID does not belong to the calling physical endpoint or any of
+its proxied endpoints.
+
+! RPMI_ERR_BUSY
+! The probe would return a segmented memory description, but the framework has
+an active number of segmented memory operations with the calling endpoint equal
+to the maximum supported.
+
+!===
+- Other errors <<table_error_codes>>.
+
+| 1
+| FLAGS
+| uint32
+| 
+
+[cols="2,5, 9a", options="header"]
+!===
+! Bits
+! Field
+! Description
+
+! [31:31]
+! MULTI_SEGMENT
+! This field is set to 1 if this is the first segment of a multi-segment
+memory probe response.
+
+The following segments can be retrieved via the
+TEE_PROBE_MEMORY_SEGMENT service.
+
+! [30:0]
+! _Reserved_
+! Must be 0.
+
+!===
+
+| 2:5
+| LABEL
+| uint8[16]
+| Label associated with the parcel on creation.
+
+| 6
+| CREATOR_ID
+| uint32
+| Identifier of the endpoint which invoked the TEE_MEMORY_PARCEL_CREATE, leading
+to the creation of the memory parcel being probed by this service.
+
+| 7
+| CREATOR_ACCESS
+| uint8
+| Access permissions that the creator of the parcel retained as part of the
+invocation to TEE_MEMORY_PARCEL_CREATE.
+
+Encoding as in <<table_mem_access>>. 
+
+| 8
+| RECEIVER_CNT
+| uint32
+| Length (N) of the RECEIVER_ID and ACCESS arrays.
+
+| 9
+| BLOCK_CNT
+| uint32
+| Total number (M) of contiguous memory blocks.
+
+| 10
+| RECEIVER_ID[N]
+| uint32
+| Array with the identifiers of the endpoints to which the parcel is
+granting access to the memory.
+
+| 10+N
+| ACCESS_ACCEPT[N]
+| uint32
+| Array with the access permissions and acceptance state for each endpoint whose
+identifier is the corresponding index in RECEIVER_ID, encoded as in
+<<table_mem_access_accept>>.
+
+| 10+2N
+| BLOCK_HIGH[M]
+| uint32
+| See <<table_mem_blocks>>.
+
+| 10+2N+M
+| BLOCK_LOW[M]
+| uint32
+| See <<table_mem_blocks>>.
+
+|===
+
+==== Service: TEE_PROBE_MEMORY_SEGMENT (SERVICE_ID: 0x07)
+This service is used by an endpoint following an invocation of
+TEE_PROBE_MEMORY_PARCEL with the MULTI_SEGMENT flag set in the response data,
+i.e. when the memory description did not fit in the maximum message size
+supported by the transport.
+
+It is implementation specific (and discoverable via TEE_FEATURES_PROBE) if
+multiple concurrent multi-segment TEE_PROBE_MEMORY_PARCEL services are supported
+by the framework.
+
+[#table_tee_probe_memory_segment_request_data]
+.Request Data
+[cols="2, 5, 2, 18a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
+| 0
+| MEM_PARCEL_ID
+| uint32
+| Identifier representing the memory parcel being probed.
+
+|===
+
+[#table_tee_probe_memory_segment_response_data]
+.Response Data
+[cols="2, 5, 2, 18a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
+| 0
+| STATUS
+| int32
+| Return error code.
+
+[cols="5,6a", options="header"]
+!===
+! Error Code
+! Description
+
+! RPMI_SUCCESS
+! The service completed successfully.
+
+If this was the last segment:
+
+- no further call of TEE_PROBE_MEMORY_SEGMENT on this memory parcel can be
+issued by this endpoint.
+
+! RPMI_ERR_INVALID_PARAM
+!
+
+- Unknown MEM_PARCEL_ID.
+
+- Multi-segment probe of MEM_PARCEL_ID not initiated by TEE_PROBE_MEMORY_PARCEL.
+
+!===
+- Other errors <<table_error_codes>>.
+
+| 1
+| FLAGS
+| uint32
+| 
+
+[cols="2,4, 9a", options="header"]
+!===
+! Bits
+! Field
+! Description
+
+! [31:31]
+! LAST_SEGMENT
+! 
+   0b0: More segments to be received.
+   0b1: This is the last segment.
+
+! [30:0]
+! _Reserved_
+! Must be 0.
+
+!===
+
+| 2
+| BLOCK_CNT
+| uint32
+| Total number (M) of contiguous memory blocks. On success, it will be 0.
+
+| 3
+| BLOCK_HIGH[M]
+| uint32
+| See <<table_mem_blocks>>.
+
+| 3+M
+| BLOCK_LOW[M]
+| uint32
+| See <<table_mem_blocks>>.
+
+|===
+
+==== Service: TEE_PROBE_SERVICE (SERVICE_ID: 0x08)
+This service allows the caller to retrieve the list of all physical endpoints
+which implement the requested service.
+
+This can be used by an endpoint which is not performing a full system
+discovery to directly locate, and then utilize in a TEE_CALL service, a well
+known specific service provided by another endpoint.
+
+
+[#table_tee_probe_service_request_data]
+.Request Data
+[cols="2, 6, 3, 18a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
+| 0:3
+| SERVICE
+| uint8[16]
+| Bytes[0..15] of the UUID identifying the requested service.
+|===
+
+[#table_tee_probe_service_response_data]
+.Response Data
+[cols="2, 6, 3, 18a", width=100%, align="center", options="header"]
+|===
+| Word
+| Name
+| Type
+| Description
+
+| 0
+| STATUS
+| int32
+| Return error code.
+
+[cols="5,5", options="header"]
+!===
+! Error Code
+! Description
+
+! RPMI_SUCCESS
+! Service completed successfully.
+
+! RPMI_ERR_NO_DATA
+! SERVICE not supported by any endpoint.
+!===
+- Other errors <<table_error_codes>>.
+
+| 1
+| ENDPOINT_ID_CNT
+| uint32
+| Length (N) of the ENDPOINT_ID array.
+
+| 2
+| ENDPOINT_ID[N]
+| uint32
+| Array containing the identifiers of all endpoints implementing the service
+requested in the SERVICE field.
+
 |===
 
 [#srvgrp_tee_exit]
-==== Service: TEE_EXIT (SERVICE_ID: 0x04)
+==== Service: TEE_EXIT (SERVICE_ID: 0x09)
 This service is used by an REE or TEE to inform the framework that it is exiting
 the framework infrastructure.
 
@@ -717,7 +1131,7 @@ is sent to all endpoints which registered for it.
 
 
 [#srvgrp_tee_signal_bus_setup]
-==== Service: TEE_SIGNAL_BUS_SETUP (SERVICE_ID: 0x05)
+==== Service: TEE_SIGNAL_BUS_SETUP (SERVICE_ID: 0x0A)
 Signals differ from data messages in that their implementation by the
 framework is not guaranteed to be synchronous.
 
@@ -841,7 +1255,7 @@ RPMI_ERR_DENIED, the framework will interpret it as a malfunction and behave as
 if it had invoked the TEE_EXIT service.
 
 [#srvgrp_tee_signal_bus_teardown]
-==== Service: TEE_SIGNAL_BUS_TEARDOWN (SERVICE_ID: 0x06)
+==== Service: TEE_SIGNAL_BUS_TEARDOWN (SERVICE_ID: 0x0B)
 This service is used by an REE or TEE to tear down the signal bus it has
 established with a target TEE. 
 
@@ -929,7 +1343,7 @@ TEE_EXIT service.
 
 
 [#srvgrp_tee_signal_raise]
-==== Service: TEE_SIGNAL_RAISE (SERVICE_ID: 0x07)
+==== Service: TEE_SIGNAL_RAISE (SERVICE_ID: 0x0C)
 This service is used by an endpoint to raise one or more signals on the signal
 bus shared with the target endpoint.
 
@@ -1008,7 +1422,7 @@ Each signal needs to be in the range reserved for the sender endpoint to raise.
 |===
 
 [#srvgrp_tee_signal_retrieve]
-==== Service: TEE_SIGNAL_RETRIEVE (SERVICE_ID: 0x08)
+==== Service: TEE_SIGNAL_RETRIEVE (SERVICE_ID: 0x0D)
 This service is used by an endpoint to retrieve its pending signals from the
 framework.
 
@@ -1098,7 +1512,7 @@ to retrieve.
 |===
 
 [#srvgrp_tee_memory_parcel_create]
-==== Service: TEE_MEMORY_PARCEL_CREATE (SERVICE_ID: 0x09)
+==== Service: TEE_MEMORY_PARCEL_CREATE (SERVICE_ID: 0x0E)
 This service allows an endpoint to create a memory parcel, which is a structured
 description of a memory management operation between a number of endpoints that
 the framework needs to mediate and enforce.
@@ -1361,7 +1775,7 @@ destroyed.
 | uint8[16]
 | Label to be associated with the parcel. The label can be used to associate a
 parcel with a specific use case when the parcel is recovered via the
-TEE_PROBE_SYSTEM service.
+TEE_PROBE_MEMORY_PARCEL service.
 
 | 10
 | RECEIVER_ID[N]
@@ -1426,6 +1840,12 @@ creating the memory parcel.
 - The endpoint creating the memory parcel is not the REE/TEE this service is
 being invoked from or one of its proxied endpoints.
 
+! RPMI_ERR_BUSY
+! Attempting to pass a segmented memory description when the framework has an
+active number of segmented memory operations with the calling endpoint equal to
+the maximum supported.
+
+
 !===
 - Other errors <<table_error_codes>>.
 
@@ -1441,7 +1861,7 @@ MEM_PARCEL_ID is not yet usable with any other service except TEE_MEMORY_SEGMENT
 |===
 
 [#srvgrp_tee_memory_parcel_accept]
-==== Service: TEE_MEMORY_PARCEL_ACCEPT (SERVICE_ID: 0x0A)
+==== Service: TEE_MEMORY_PARCEL_ACCEPT (SERVICE_ID: 0x0F)
 This service is used by an endpoint to accept memory to which it has been granted
 access and/or ownership.
 
@@ -1690,6 +2110,11 @@ destroyed and its identifier can be reused by the framework.
 
 - Invalid GPA_HINT.
 
+! RPMI_ERR_BUSY
+! TEE_MEMORY_PARCEL_ACCEPT would return a segmented memory description, but the
+framework has an active number of segmented memory operations with the calling
+endpoint equal to the maximum supported.
+
 !===
 - Other errors <<table_error_codes>>.
 
@@ -1741,7 +2166,7 @@ TEE_MEMORY_SEGMENT_RECEIVE service.
 |===
 
 [#srvgrp_tee_memory_parcel_release]
-==== Service: TEE_MEMORY_PARCEL_RELEASE (SERVICE_ID: 0x0B)
+==== Service: TEE_MEMORY_PARCEL_RELEASE (SERVICE_ID: 0x10)
 This service is called by an endpoint which was granted access (but not
 ownership) to some memory via a memory parcel, to release it back to the
 memory parcel creator, who can reclaim it back by using the
@@ -1880,7 +2305,7 @@ the memory parcel (or they have already released their claim to it).
 |===
 
 [#srvgrp_tee_memory_parcel_reclaim]
-==== Service: TEE_MEMORY_PARCEL_RECLAIM (SERVICE_ID: 0x0C)
+==== Service: TEE_MEMORY_PARCEL_RECLAIM (SERVICE_ID: 0x11)
 This service is called by an endpoint which had previously created a memory
 parcel to reclaim access to the memory and access right it had before its creation.
 A successful completion of this service destroys the memory parcel, whose
@@ -1987,7 +2412,7 @@ restored and after the last of the receivers released the parcel.
 |===
 
 [#srvgrp_tee_memory_segment_send]
-==== Service: TEE_MEMORY_SEGMENT_SEND (SERVICE_ID: 0x0D)
+==== Service: TEE_MEMORY_SEGMENT_SEND (SERVICE_ID: 0x12)
 This service is used to complete the creation of a memory parcel whose memory
 description doesn't fit in the RPMI transport buffer used for the
 TEE_MEMORY_PARCEL_CREATE service.
@@ -2114,7 +2539,7 @@ of the parcel.
 |===
 
 [#srvgrp_tee_memory_segment_receive]
-==== Service: TEE_MEMORY_SEGMENT_RECEIVE (SERVICE_ID: 0x0E)
+==== Service: TEE_MEMORY_SEGMENT_RECEIVE (SERVICE_ID: 0x13)
 This service is used by an endpoint following an invocation of TEE_MEMORY_ACCEPT
 with the MULTI_SEGMENT flag set in the response data, i.e. when the memory
 description did not fit in the maximum message size supported by the transport.
@@ -2235,7 +2660,7 @@ operation.
 |===
 
 [#srvgrp_tee_register_for_lifecycle_info]
-==== Service: TEE_REGISTER_FOR_LIFECYCLE_INFO (SERVICE_ID: 0x0F)
+==== Service: TEE_REGISTER_FOR_LIFECYCLE_INFO (SERVICE_ID: 0x14)
 When a hypervisor is present in a domain, EEs (as VMs), can be created and
 destroyed at runtime. The lifecycle services are meant to allow other REEs and
 TEEs to be made aware of information about the instantiation of a new physical
@@ -2243,8 +2668,8 @@ endpoint (usually REEs, but potentially also TEEs) when they are created, their
 destruction or a change in their identity, for example as an effect of
 progressing in a chain of bootloaders.
 
-They complement the TEE_PROBE_SYSTEM service, which provides information on the
-whole system at the moment it is invoked, by allowing REEs and TEEs to stay up
+They complement the TEE_PROBE services, which provide information on the
+system at the moment they are invoked, by allowing REEs and TEEs to stay up
 to date with the state of whole system as it changes over time.
 
 The TEE_ON_START_INFO, TEE_ON_SHUTDOWN_INFO and TEE_ON_CHANGED_INFO differ from
@@ -2269,7 +2694,7 @@ REE/TEE with the same identifier is created again at a later time).
 
 * Lifecycle services are strictly serialized, specifically:
 
-** They are delivered in the same order for all receivers.
+** They are delivered in the same order to all receivers.
 
 ** In case of a receiver gracefully yielding to the framework during the
 processing of a message (by returning the RPMI_ERR_IO error code), no further
@@ -2286,13 +2711,6 @@ processing is completed with a non-yielding response.
 | Description
 
 | 0
-| SYSINFO_FORMAT
-| uint32
-| The format in which the data shall be returned by the framework when a new
-endpoint is created or changed. Needs to be one of the formats (i.e. a single
-bit) returned by the TEE_PROBE_FEATURES service.
-
-| 1
 | FLAGS
 | uint32
 | 
@@ -2344,15 +2762,13 @@ calling endpoint.
 !
 - Caller already registered or deregistered.
 
-- Unsupported format.
-
 !===
 - Other errors <<table_error_codes>>.
 
 |===
 
 [#srvgrp_tee_on_start_info]
-==== Service: TEE_ON_START_INFO (SERVICE_ID: 0x10)
+==== Service: TEE_ON_START_INFO (SERVICE_ID: 0x15)
 The framework will send this message to an endpoint which has previously
 registered to receive information about lifecycle events when a new REE or TEE
 is started and registered on the framework.
@@ -2370,7 +2786,7 @@ itself, and will reject any attempt by an endpoint to send it.
 
 [#table_tee_on_start_info_request_data]
 .Request Data
-[cols="2, 5, 2, 18a", width=100%, align="center", options="header"]
+[cols="2, 6, 3, 18a", width=100%, align="center", options="header"]
 |===
 | Word
 | Name
@@ -2378,20 +2794,14 @@ itself, and will reject any attempt by an endpoint to send it.
 | Description
 
 | 0
-| ENDPOINT_ID
+| DOMAIN_ID
 | uint32
-| Unique identifier of the REE/TEE.
+| Identifier of the domain in which the newly started REE/TEE is located.
 
 | 1
-| DATA_LEN
+| ENDPOINT_ID
 | uint32
-| Length (N) in bytes of the returned data containing the description of the
-newly created REE/TEE.
-
-| 2
-| DATA[N]
-| uint8
-| Data describing the newly created REE/TEE, in the requested format.
+| Identifier of the physical endpoint associated to the newly started REE/TEE.
 
 |===
 
@@ -2417,7 +2827,6 @@ newly created REE/TEE.
 ! RPMI_SUCCESS
 ! Data for newly created REE/TEE has been processed.
 
-
 ! RPMI_ERR_IO
 !
 This error can only be returned by a TEE.
@@ -2439,7 +2848,7 @@ implementation defined manner.
 |===
 
 [#srvgrp_tee_on_shutdown_info]
-==== Service: TEE_ON_SHUTDOWN_INFO (SERVICE_ID: 0x11)
+==== Service: TEE_ON_SHUTDOWN_INFO (SERVICE_ID: 0x16)
 The framework will send this message to an endpoint which has previously
 registered to receive information about lifecycle events when an REE or TEE is
 shutdown. It is also called when an endpoint decided to
@@ -2462,7 +2871,8 @@ itself, and will reject any attempt by an endpoint to send it.
 | 0
 | ENDPOINT_ID
 | uint32
-| Unique identifier of the REE/TEE.
+| Unique identifier of the physical endpoint associated to the REE/TEE which has
+shut down.
 |===
 
 [#table_tee_on_shutdown_info_response_data]
@@ -2509,7 +2919,7 @@ implementation defined manner.
 |===
 
 [#srvgrp_tee_on_changed_info]
-==== Service: TEE_ON_CHANGED_INFO (SERVICE_ID: 0x12)
+==== Service: TEE_ON_CHANGED_INFO (SERVICE_ID: 0x17)
 The framework will send this message to an endpoint which has previously
 registered to receive information about lifecycle events when an existing
 REE/TEE changes its own internal configuration/runtime (typically as a result of
@@ -2528,7 +2938,7 @@ Same as <<table_tee_on_start_info_request_data>>.
 Same as <<table_tee_on_start_info_response_data>>.
 
 [#srvgrp_tee_call]
-==== Service: TEE_CALL (SERVICE_ID: 0x13)
+==== Service: TEE_CALL (SERVICE_ID: 0x18)
 This service is used to send data synchronously from an endpoint (in an REE or
 TEE) to a TEE.
 
